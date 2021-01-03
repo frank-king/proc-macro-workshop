@@ -12,4 +12,26 @@
 // (macro, trait, struct) through the one bitfield crate.
 pub use bitfield_impl::bitfield;
 
-// TODO other things
+pub trait Specifier {
+    const BITS: u8;
+}
+
+macro_rules! bits(
+    ( $($name:ident:$bits:literal),+ $(,)? ) => { $(
+        pub struct $name;
+        impl Specifier for $name {
+            const BITS: u8 = $bits;
+        }
+    )* }
+);
+
+bits!(
+    B1 : 1, B2 : 2, B3 : 3, B4 : 4, B5 : 5, B6 : 6, B7 : 7, B8 : 8,
+    B9 : 9, B10:10, B11:11, B12:12, B13:13, B14:14, B15:15, B16:16,
+    B17:17, B18:18, B19:19, B20:20, B21:21, B22:22, B23:23, B24:24,
+    B25:25, B26:26, B27:27, B28:28, B29:29, B30:30, B31:31, B32:32,
+    B33:33, B34:34, B35:35, B36:36, B37:37, B38:38, B39:39, B40:40,
+    B41:41, B42:42, B43:43, B44:44, B45:45, B46:46, B47:47, B48:48,
+    B49:49, B50:50, B51:51, B52:52, B53:53, B54:54, B55:55, B56:56,
+    B57:57, B58:58, B59:59, B60:60, B61:61, B62:62, B63:63, B64:64,
+);
