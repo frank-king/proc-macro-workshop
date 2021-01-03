@@ -7,5 +7,9 @@ publish = false
 [lib]
 proc-macro = true
 
+[features]
+default = ["syn/full", "syn/quote"]
+
 [dependencies]
-# TODO
+syn = "1.0"
+quote = "1.0"
