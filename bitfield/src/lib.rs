@@ -16,13 +16,40 @@ pub trait Specifier {
     const BITS: u8;
 }
 
+#[inline]
+fn mask_bits(start: u8, end: u8) -> u8 {
+    let len = (end - start) as u16;
+    (((1 << len) - 1) as u8) << start
+}
+
+#[inline]
+pub fn set_bits(data: &mut u8, start: u8, end: u8, value: &mut u64) {
+    let mask = mask_bits(start, end);
+    let reversed = reverse_bits(*value, (end - start) as usize) as u8;
+    *data &= !mask;
+    *data |= mask & (reversed << start);
+    *value >>= end - start;
+}
+
+#[inline]
+pub fn get_bits(data: &u8, start: u8, end: u8, value: &mut u64) {
+    let mask = mask_bits(start, end);
+    *value <<= end - start;
+    *value |= ((data & mask) >> start) as u64;
+}
+
+#[inline]
+pub fn reverse_bits(value: u64, bits: usize) -> u64 {
+    value.reverse_bits() >> (64 - bits)
+}
+
 macro_rules! bits(
     ( $($name:ident:$bits:literal),+ $(,)? ) => { $(
         pub struct $name;
         impl Specifier for $name {
             const BITS: u8 = $bits;
         }
-    )* }
+    )* };
 );
 
 bits!(
