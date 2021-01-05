@@ -1,7 +1,7 @@
 use quote::quote;
 use std::iter::FromIterator;
 use syn::export::TokenStream2;
-use syn::{Data, DeriveInput, Error, Fields, Ident, Result, Type};
+use syn::{Data, DeriveInput, Error, Fields, GenericArgument, Ident, PathArguments, Type};
 
 macro_rules! tokenize (
     ( $ty:ident( $fmt:literal, $value:expr ) ) => {
@@ -15,6 +15,7 @@ macro_rules! tokenize (
 struct Field {
     ident: Ident,
     ty: Type,
+    optional: bool,
 }
 
 pub struct BuilderImpl {
@@ -36,7 +37,7 @@ fn none() -> TokenStream2 {
 }
 
 impl BuilderImpl {
-    pub fn from_derive_input(input: DeriveInput) -> Result<Self> {
+    pub fn from_derive_input(input: DeriveInput) -> syn::Result<Self> {
         let name = input.ident;
         if let Data::Struct(r#struct) = input.data {
             if let Fields::Named(named) = r#struct.fields {
@@ -44,9 +45,14 @@ impl BuilderImpl {
                 let fields: Vec<Field> = named
                     .named
                     .into_iter()
-                    .map(|field| Field {
-                        ident: field.ident.unwrap(),
-                        ty: field.ty,
+                    .map(|field| {
+                        let ident = field.ident.unwrap();
+                        let (optional, ty) = Self::extract_option(field.ty);
+                        Field {
+                            ident,
+                            ty,
+                            optional,
+                        }
                     })
                     .collect();
                 return Ok(Self {
@@ -80,11 +86,26 @@ impl BuilderImpl {
         }
     }
 
+    fn extract_option(ty: Type) -> (bool, Type) {
+        if let Type::Path(path) = &ty {
+            if let Some(last) = path.path.segments.last() {
+                if last.ident == "Option" {
+                    if let PathArguments::AngleBracketed(arguments) = &last.arguments {
+                        if let Some(GenericArgument::Type(ty)) = arguments.args.first() {
+                            return (true, ty.clone());
+                        }
+                    }
+                }
+            }
+        }
+        (false, ty)
+    }
+
     fn builder_struct(&self) -> TokenStream2 {
         let option = option();
         let builder_name = &self.builder_name;
         let contents = TokenStream2::from_iter(self.fields.iter().map(|field| {
-            let Field { ident, ty } = field;
+            let Field { ident, ty, .. } = field;
             quote!(#ident: #option<#ty>, )
         }));
         quote! {
@@ -98,7 +119,7 @@ impl BuilderImpl {
         let none = none();
         let builder_name = &self.builder_name;
         let contents = TokenStream2::from_iter(self.fields.iter().map(|field| {
-            let Field { ident, ty: _ } = field;
+            let Field { ident, .. } = field;
             quote!(#ident: #none, )
         }));
         quote! {
@@ -111,7 +132,7 @@ impl BuilderImpl {
     fn builder_setters(&self) -> TokenStream2 {
         let some = some();
         TokenStream2::from_iter(self.fields.iter().map(|field| {
-            let Field { ident, ty } = field;
+            let Field { ident, ty, .. } = field;
             quote! {
                 pub fn #ident(&mut self, value: #ty) -> &mut Self {
                     self.#ident = #some(value);
@@ -126,15 +147,25 @@ impl BuilderImpl {
         let some = some();
         let none = none();
         let name = &self.name;
-        let cond = TokenStream2::from_iter(self.fields.iter().map(|field| {
-            let Field { ident, ty: _ } = field;
-            quote! {
-                && self.#ident.is_some()
+        let cond = TokenStream2::from_iter(self.fields.iter().filter_map(|field| {
+            let Field {
+                ident, optional, ..
+            } = field;
+            if !optional {
+                Some(quote! ( && self.#ident.is_some() ))
+            } else {
+                None
             }
         }));
         let values = TokenStream2::from_iter(self.fields.iter().map(|field| {
-            let Field { ident, ty: _ } = field;
-            quote!(#ident: self.#ident.take().unwrap(), )
+            let Field {
+                ident, optional, ..
+            } = field;
+            if !optional {
+                quote!(#ident: self.#ident.take().unwrap(), )
+            } else {
+                quote!(#ident: self.#ident.take(), )
+            }
         }));
         quote! {
             pub fn build(&mut self) -> #option<#name> {
