@@ -40,7 +40,7 @@ pub fn derive(input: TokenStream) -> TokenStream {
             let builder_setters = TokenStream2::from_iter(fields.iter().map(|field| {
                 let (ident, ty) = field;
                 quote! {
-                    pub fn #ident(mut self, value: #ty) -> Self {
+                    pub fn #ident(&mut self, value: #ty) -> &mut Self {
                         self.#ident = Some(value);
                         self
                     }
@@ -54,7 +54,7 @@ pub fn derive(input: TokenStream) -> TokenStream {
             }));
             let build = TokenStream2::from_iter(fields.iter().map(|field| {
                 let (ident, _) = field;
-                quote!(#ident: self.#ident.unwrap(), )
+                quote!(#ident: self.#ident.take().unwrap(), )
             }));
             let output = quote! {
                 impl #ident {
@@ -69,7 +69,7 @@ pub fn derive(input: TokenStream) -> TokenStream {
 
                 impl #builder_ident {
                     #builder_setters
-                    pub fn build(self) -> #option<#ident> {
+                    pub fn build(&mut self) -> #option<#ident> {
                         if true #build_cond {
                             #some(#ident {
                                 #build
