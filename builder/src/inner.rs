@@ -119,8 +119,18 @@ impl BuilderImpl {
         }
         let attr = attrs.pop().unwrap();
         let name = &attr.path.segments.last().unwrap().ident;
+        // eprintln!("{:#?}", attr);
+        let path = &attr.path;
+        let tokens = &attr.tokens;
+        let span = quote!(#path #tokens);
+        let err = |span: TokenStream2| {
+            Err(Error::new_spanned(
+                span,
+                "expected `builder(each = \"...\")`",
+            ))
+        };
         if name != "builder" {
-            return Err(Error::new(name.span(), "Unrecognized attribute"));
+            return err(span);
         }
         struct Each {
             each: Ident,
@@ -139,7 +149,7 @@ impl BuilderImpl {
         let tokens = attr.tokens;
         let each: Each = parse2(tokens)?;
         if each.each != "each" {
-            return Err(Error::new(each.each.span(), "Unrecognized attribute"));
+            return err(span);
         }
         let each = each.sym;
         Ok(tokenize!(Ident("{}", each.value(), each.span())))
