@@ -1,8 +1,9 @@
 use quote::quote;
-use syn::export::TokenStream2;
+use std::iter::FromIterator;
+use syn::export::{ToTokens, TokenStream2};
 use syn::parse::{Parse, ParseStream};
 use syn::spanned::Spanned;
-use syn::{parse2, Data, DeriveInput, Error, Field, Fields, LitStr, Token};
+use syn::{parse2, Data, DeriveInput, Error, Field, Fields, GenericParam, Generics, LitStr, Token};
 
 pub struct CustomDebug {
     input: DeriveInput,
@@ -20,16 +21,52 @@ impl CustomDebug {
         let error = quote!(std::fmt::Error);
         let ident = &self.input.ident;
         let write_fields = self.format()?;
-        Ok(quote! {
-            impl #debug for #ident {
+        let fmt = quote! {
                 fn fmt(&self, fmt: &mut #formatter) -> #result<(), #error> {
                     write!(fmt, "{} {{", stringify!(#ident))?;
                     #write_fields
                     write!(fmt, "}}")?;
                     Ok(())
                 }
-            }
-        })
+        };
+        if let Some((params, wheres)) = self.extract_generics(&self.input.generics) {
+            Ok(quote! {
+                impl<#params> #debug for #ident<#params> where #wheres {
+                    #fmt
+                }
+            })
+        } else {
+            Ok(quote!( impl #debug for #ident { #fmt } ))
+        }
+    }
+
+    fn extract_generics(&self, generics: &Generics) -> Option<(TokenStream2, TokenStream2)> {
+        if generics.params.is_empty() {
+            return None;
+        }
+        let params = &generics.params;
+        let wheres = generics
+            .where_clause
+            .as_ref()
+            .map(|r#where| &r#where.predicates);
+        let debug = quote!(std::fmt::Debug);
+        let wheres = TokenStream2::from_iter(
+            wheres
+                .iter()
+                .map(|r#where| r#where.to_token_stream())
+                .chain(params.iter().filter_map(|param| {
+                    if let GenericParam::Type(ty) = param {
+                        let ident = &ty.ident;
+                        Some(quote!(#ident: #debug,))
+                    } else {
+                        None
+                    }
+                })),
+        );
+        if wheres.is_empty() {
+            return None;
+        }
+        Some((params.to_token_stream(), wheres))
     }
 
     fn format(&self) -> syn::Result<TokenStream2> {
