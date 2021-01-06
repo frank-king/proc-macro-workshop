@@ -20,7 +20,7 @@ macro_rules! tokenize (
 enum FieldKind {
     Required,
     Optional,
-    Repeated { ident: Ident, ty: Type },
+    Repeated { each: Ident, inner: Type },
 }
 
 struct Field {
@@ -33,22 +33,6 @@ pub struct BuilderImpl {
     name: Ident,
     builder_name: Ident,
     fields: Vec<Field>,
-}
-
-fn option() -> TokenStream2 {
-    quote!(std::option::Option)
-}
-
-fn some() -> TokenStream2 {
-    quote!(std::option::Option::Some)
-}
-
-fn none() -> TokenStream2 {
-    quote!(std::option::Option::None)
-}
-
-fn vec() -> TokenStream2 {
-    quote!(std::vec::Vec)
 }
 
 impl BuilderImpl {
@@ -99,10 +83,7 @@ impl BuilderImpl {
             let each = Self::get_attr_each(field.attrs)?;
             let inner = Self::extract_inner(&ty, |_| true)
                 .ok_or_else(|| Error::new(ty.span(), "Not a container"))?;
-            let kind = FieldKind::Repeated {
-                ident: each,
-                ty: inner,
-            };
+            let kind = FieldKind::Repeated { each, inner };
             Ok(Field { ident, ty, kind })
         } else {
             let (kind, ty) = match Self::extract_option(&ty) {
@@ -175,14 +156,15 @@ impl BuilderImpl {
     }
 
     fn builder_struct(&self) -> TokenStream2 {
-        let option = option();
-        let vec = vec();
+        let option = quote!(::std::option::Option);
+        let vec = quote!(::std::vec::Vec);
+        let cell = quote!(::std::cell::Cell);
         let builder_name = &self.builder_name;
         let contents = TokenStream2::from_iter(self.fields.iter().map(|field| {
             let Field { ident, ty, kind } = field;
             match kind {
                 FieldKind::Required | FieldKind::Optional => quote!(#ident: #option<#ty>, ),
-                FieldKind::Repeated { ty, .. } => quote!(#ident: #vec<#option<#ty>>, ),
+                FieldKind::Repeated { inner: ty, .. } => quote!(#ident: #cell<#vec<#ty>>, ),
             }
         }));
         quote! {
@@ -193,14 +175,15 @@ impl BuilderImpl {
     }
 
     fn builder_fn(&self) -> TokenStream2 {
-        let none = none();
-        let vec = vec();
+        let none = quote!(::std::option::Option::None);
+        let vec = quote!(::std::vec::Vec);
+        let cell = quote!(::std::cell::Cell);
         let builder_name = &self.builder_name;
         let contents = TokenStream2::from_iter(self.fields.iter().map(|field| {
             let Field { ident, kind, .. } = field;
             match kind {
                 FieldKind::Required | FieldKind::Optional => quote!(#ident: #none, ),
-                FieldKind::Repeated { .. } => quote!(#ident: #vec::new(), ),
+                FieldKind::Repeated { .. } => quote!(#ident: #cell::new(#vec::new()), ),
             }
         }));
         quote! {
@@ -211,7 +194,7 @@ impl BuilderImpl {
     }
 
     fn builder_setters(&self) -> TokenStream2 {
-        let some = some();
+        let some = quote!(::std::option::Option::Some);
         TokenStream2::from_iter(self.fields.iter().map(|field| {
             let Field { ident, ty, kind } = field;
             match kind {
@@ -221,12 +204,9 @@ impl BuilderImpl {
                         self
                     }
                 },
-                FieldKind::Repeated {
-                    ident: each,
-                    ty: inner,
-                } => quote! {
+                FieldKind::Repeated { each, inner } => quote! {
                     pub fn #each(&mut self, value: #inner) -> &mut Self {
-                        self.#ident.push(#some(value));
+                        self.#ident.get_mut().push(value);
                         self
                     }
                 },
@@ -235,39 +215,34 @@ impl BuilderImpl {
     }
 
     fn build_fn(&self) -> TokenStream2 {
-        let option = option();
-        let some = some();
-        let none = none();
+        let result = quote!(::std::result::Result);
+        let r#box = quote!(::std::boxed::Box);
+        let vec = quote!(::std::vec::Vec);
+        let error = quote!(::std::error::Error);
+        let ok = quote!(::std::result::Result::Ok);
         let name = &self.name;
-        let cond = TokenStream2::from_iter(self.fields.iter().filter_map(|field| {
+        let let_values = TokenStream2::from_iter(self.fields.iter().map(|field| {
             let Field { ident, kind, .. } = field;
-            if let FieldKind::Required = kind {
-                Some(quote! ( && self.#ident.is_some() ))
-            } else {
-                None
+            let ident_str = ident.to_string();
+            match kind {
+                FieldKind::Required => quote! {
+                    let #ident = self.#ident.take().ok_or_else(
+                        || #r#box::<dyn #error>::from(format!("{} required, but not set", #ident_str)))?;
+                },
+                FieldKind::Optional => quote!(let #ident = self.#ident.take(); ),
+                FieldKind::Repeated { .. } => quote! {
+                    let #ident = self.#ident.replace(#vec::new()).into_iter().collect();
+                },
             }
         }));
-        let values = TokenStream2::from_iter(self.fields.iter().map(|field| {
-            let Field { ident, kind, .. } = field;
-            match kind {
-                FieldKind::Required => quote!(#ident: self.#ident.take().unwrap(), ),
-                FieldKind::Optional => quote!(#ident: self.#ident.take(), ),
-                FieldKind::Repeated { .. } => {
-                    quote! {
-                        #ident: self.#ident.iter_mut().map(|each| each.take().unwrap()).collect(),
-                    }
-                }
-            }
+        let fields = TokenStream2::from_iter(self.fields.iter().map(|field| {
+            let Field { ident, .. } = field;
+            quote! ( #ident, )
         }));
         quote! {
-            pub fn build(&mut self) -> #option<#name> {
-                if true #cond {
-                    #some(#name {
-                        #values
-                    })
-                } else {
-                    #none
-                }
+            pub fn build(&mut self) -> #result<#name, #r#box<dyn #error>> {
+                #let_values
+                #ok(#name { #fields })
             }
         }
     }
