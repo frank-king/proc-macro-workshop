@@ -1,18 +1,17 @@
 use proc_macro::TokenStream;
 
-use quote::quote;
+use inner::CustomDebug;
 use syn::{parse_macro_input, DeriveInput};
+
+mod inner;
 
 #[proc_macro_derive(CustomDebug)]
 pub fn derive(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
-    let ident = input.ident;
-    let result = quote! {
-        impl std::fmt::Debug for #ident {
-            fn fmt(&self, fmt: &mut std::fmt::Formatter<'_>) -> std::result::Result<(), std::fmt::Error> {
-                todo!()
-            }
-        }
-    };
+    let custom_debug = CustomDebug::from_derive_input(input);
+    let result = custom_debug
+        .build()
+        .unwrap_or_else(|err| err.to_compile_error());
+    // eprintln!("{}", result.to_string());
     TokenStream::from(result)
 }
