@@ -15,9 +15,6 @@ path = "tests/progress.rs"
 [dev-dependencies]
 trybuild = { version = "1.0", features = ["diff"] }
 
-[features]
-default = ["syn/full", "syn/quote", "syn/extra-traits"]
-
 [dependencies]
 syn = "1.0"
 quote = "1.0"
